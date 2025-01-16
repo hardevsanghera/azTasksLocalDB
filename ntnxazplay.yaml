@@ -53,11 +53,6 @@
         src: user_data.j2
         dest: user_data.sh
 
-    - name: (6 of 40) template Administrator password into sysprep for new SQL Server
-      template:
-        src: sysprep.j2
-        dest: sysprep.txt
-
     - name: (7 of 40) template SQL server SA password into SQL Server installation script
       template:
         src: sqlsvr-installSqlServerps1.j2
