@@ -1,0 +1,5 @@
+#set -x
+export AZURE_SUBSCRIPTION_ID=
+export AZURE_CLIENT_ID=
+export AZURE_SECRET=
+export AZURE_TENANT=
