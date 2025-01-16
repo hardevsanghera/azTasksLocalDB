@@ -126,7 +126,7 @@ echo "STATIC_URL = '/static/'" >> $localSettings
 echo "STATIC_ROOT = '$staticFiles'" >> $localSettings
 
 #Run migration/home/webadmin/djangoProj/prodTasksProj/prodTasksProjs
-netstat -tunl | grep 8888
+netstat -tunl | grep $dbPORT
 cd ..
 python3 manage.py makemigrations
 python3 manage.py migrate
