@@ -286,7 +286,10 @@
     - name: (38 of 40) Set Output message for completion
       ansible.builtin.set_fact: 
         final_msg: | 
-          {{'"'}}Webserver1 IP: {{webservervmip}} {{'"'}}
+          {{'"'}}Finished, Webserver1 IP: {{webservervmip}} {{'"'}}
+
+    - pause: #Work around for timing issues.
+      seconds: 90
     
     - name: (39/40 of 40) Print out final message
       debug:
