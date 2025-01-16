@@ -1,0 +1,298 @@
+---
+#Deploy an on-prem (eg. home) Windows VM with MSSQL to be the database server for a front-end VM (Django app on Ubuntu deployed to Azure)
+#This version of the play-book assumes that the target Windows Server VM has already been deployed, powered on and has the SQL Server .iso and SQL Studio exe on disk.
+#You will need to export your Azure subscription access parameters from where you are running this play:
+#export AZURE_SUBSCRIPTION_ID=something
+#export AZURE_CLIENT_ID=something
+#export AZURE_SECRET=something
+#export AZURE_TENANT=something
+#
+#By successfully running this play you will end p with 1x VM "on-prem" (MSFT Server 2022, this is deployed by you, you also provide its IP address in the vars.yaml file
+#In addition the VM should have the SQL Server .iso and SQL Studio .exe on disk in C:\WIndows\temp)
+#hardev@nutanix.com Jan '25
+- name: Deploy multi-tier infrastructure, a VM on-prem and a VM in Azure.
+  hosts: localhost
+  gather_facts: False
+  vars_files:
+    - vars/vars.yaml
+    - varsaz/varsaz.yaml
+  vars:
+    loopdata: 
+      web1:
+        server: "{{ webservervmip }}"
+        index: "0"
+      web2:
+        server: "{{ webservervmip2 }}"
+        index: "1"    
+
+  tasks:
+    - name: (1 of 40) Setting Variables
+      debug: 
+        msg: "{{ ansible_play_name }}  - Did you edit the variables in ./vars/vars.yaml to reflect your environment and optionaly ./varsaz/varsaz.yaml to reflect your environment?"
+
+    - name: (2 of 40) generate SSH keys for the db server to access the webservers
+      openssh_keypair:
+        path: "./{{dbserver_ssh_key_file}}"
+        type: rsa
+        size: 4096
+        state: present
+        force: true
+
+    - name: (3 of 40) Copy PVT key and append .pem - needed for host acces by ansible
+      copy:
+       src: "./{{dbserver_ssh_key_file}}"
+       dest: "keys/{{dbserver_ssh_key_file}}.pem"
+
+    - name: (4 of 40) set variable with public key
+      set_fact: 
+         dbserverkeypub: "{{ item }}"
+      with_file: "{{ dbserverPUB_key_file }}"
+
+    - name: (5 of 40) template the password/key for webadmin user into user_data
+      template:
+        src: user_data.j2
+        dest: user_data.sh
+
+    - name: (6 of 40) template Administrator password into sysprep for new SQL Server
+      template:
+        src: sysprep.j2
+        dest: sysprep.txt
+
+    - name: (7 of 40) template SQL server SA password into SQL Server installation script
+      template:
+        src: sqlsvr-installSqlServerps1.j2
+        dest: sqlsvr-installSqlServer.ps1
+
+    - pause:
+        seconds: 9
+
+    - name: (8/9 of 40) SQL Server vm ip
+      set_fact:
+        sqlservervmip: "{{ localsqlservervmip }}"
+
+    - name: (10 of 40) Print out SQL Server VM IP
+      debug:
+        var: "sqlservervmip"
+
+    - name: (11 of 40) Dynamically add newly created Windows VM to the inventory
+      add_host:
+        hostname: "{{ sqlservervmip }}"
+        groups: threetiervms
+        ansible_user: "{{ win_vm_user }}"
+        ansible_password: "{{ win_vm_pw }}"
+        ansible_connection: winrm
+        ansible_winrm_port: 5985
+        ansible_winrm_transport: ntlm
+
+    - pause: #Work around for timing issues.
+        seconds: 9
+
+    - name: (12 of 40) Read disk setup script file into a variable
+      set_fact: 
+         setdiskps1: "{{ item }}"
+      with_file: "{{ setdiskps1_file }}"
+
+    - name: (13 of 40) Setup "E" Datadisk for SQL Server
+      ansible.windows.win_powershell:
+        script: "{{ setdiskps1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+
+#    - meta: end_play
+
+    - name: (14 of 40) Read install SQL Server script file into a variable
+      set_fact: 
+         installsqlserverps1: "{{ item }}"
+      with_file: "{{ installsqlserverps1_file }}"
+
+    - name: (14.1 of 36) Read install SQL Studio script file into a variable
+      set_fact: 
+         installsqlstudiops1: "{{ item }}"
+      with_file: "{{ installsqlstudiops1_file }}"
+
+    - name: (15 of 40) Copy private key to db server so it can access the webservers via ssh
+      ansible.windows.win_copy:
+        src: "dbserverkey"
+        dest: C:\co.txt
+      delegate_to: "{{ sqlservervmip }}"
+
+      #In my home setup this next step only works if Administrator is logged into the VM console!  No idea why!!?!?!?!?
+    - name: (16 of 40) Install SQL Server
+      ansible.windows.win_powershell:
+        script: "{{ installsqlserverps1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - name: (17 of 40) Install SQL Server Management Studio
+      ansible.windows.win_powershell:
+        script: "{{ installsqlstudiops1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - pause: #Work around for timing issues - need server to finish boot/customizations
+        seconds: 30
+
+    - name: (18 of 40) make a hole in the [fire]wall for SQL Server
+      ansible.windows.win_powershell:
+       script: |
+         New-NetFirewallRule -DisplayName MSSQLTCP1433 -Direction Inbound -LocalPort 1433 -Protocol TCP -Action Allow
+      delegate_to: "{{ sqlservervmip }}"
+
+    - name: (19 of 40) Create the application's database
+      ansible.windows.win_powershell:
+       script: |
+         sqlcmd -U {{ mssql_user }} -P {{ mysql_password }} -Q "CREATE DATABASE {{ mssql_dbname }};"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - name: (20 of 40) Read file into a variable
+      set_fact: 
+         plantkeyps1: "{{ item }}"
+      with_file: "{{ plantkeyps1_file }}"
+
+    - name: (21 of 40) plant ssh private key on db server
+      ansible.windows.win_powershell:
+        script: "{{ plantkeyps1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - pause: #Work around for timing issues.
+        seconds: 10
+
+#    - meta: end_play
+    - name: (22 of 40) Begin deployment of VM to Azure
+      debug: 
+        msg: "Starting deployment of VM to Azure"
+
+    - name: (23 of 40) Create Azure resource group
+      azure_rm_resourcegroup:
+        name: "{{ rg_name }}"
+        location: "{{ az_region }}"
+    - name: (24 of 40) Create virtual network
+      azure_rm_virtualnetwork:
+        resource_group: "{{ rg_name }}"
+        name: "{{ vnet_name }}"
+        address_prefixes: "{{ vnet_prefix }}"
+    - name: (25 of 40) Add subnet
+      azure_rm_subnet:
+        resource_group: "{{ rg_name }}"
+        name: "{{ subnet_name }}"
+        address_prefix: "{{ sn_prefix }}"
+        virtual_network: "{{ vnet_name }}"
+    - name: (26 of 40) Create public IP address
+      azure_rm_publicipaddress:
+        resource_group: "{{ rg_name }}"
+        allocation_method: Static
+        name: "{{ ip_name }}"
+      register: output_ip_address
+    - name: (27 of 40) set variable - webserver1 vm public ip
+      set_fact:
+        webservervmip: "{{ output_ip_address.state.ip_address }}"
+    - name: (28 of 40) Public IP of VM
+      debug:
+        msg: "The public IP of the Ubuntu web/app-server is {{ webservervmip }} "
+    - name: (29 of 40) Create Network Security Group that allows ports for SSH / 80 / 8080
+      azure_rm_securitygroup:
+        resource_group: "{{ rg_name }}"
+        name: "{{ sg_name }}"
+        rules:
+          - name: SSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 1001
+            direction: Inbound
+          - name: WEBA
+            protocol: Tcp
+            destination_port_range: 80
+            access: Allow
+            priority: 1002
+            direction: Inbound
+          - name: WEBB
+            protocol: Tcp
+            destination_port_range: 8080
+            access: Allow
+            priority: 1003
+            direction: Inbound
+          - name: DEV
+            protocol: Tcp
+            destination_port_range: 8000
+            access: Allow
+            priority: 1004
+            direction: Inbound
+    - name: (30 of 40) Create a network interface using existing security group and public IP
+      azure_rm_networkinterface:
+        name: "{{ nwiface_name }}"
+        resource_group: "{{ rg_name }}"
+        virtual_network: "{{ vnet_name }}"
+        subnet_name: "{{ subnet_name }}"
+        security_group: "{{ sg_name }}"
+        ip_configurations:
+          - name: "{{ nic_name }}"
+            public_ip_address_name: "{{ ip_name }}"
+            primary: true
+    - name: (31 of 40) Create the VM
+      azure_rm_virtualmachine:
+        resource_group: "{{ rg_name }}"
+        name: "{{ webappvm_name }}"
+        vm_size: "{{ az_vmsize }}"
+        admin_username: "{{ vm_adminuser }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ vm_adminuser }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('file', dbserverPUB_key_file) }}"
+        custom_data: "{{ lookup('file', cinit_script_path) }}" 
+        network_interfaces: "{{ nwiface_name }}"
+        image:
+          offer: "{{ az_imgoffer }}"
+          publisher: "{{ az_imgpublisher }}"
+          sku: "{{ az_imgsku }}"
+          version: "{{ az_imgversion }}"
+
+    - pause: #Work around for timing issues.
+       seconds: 60
+
+    - name: (32 of 40) Dynamically add newly created VM to the inventory
+      add_host:
+        hostname: "{{ item }}"
+        groups: threetiervms
+        ansible_ssh_user: "{{ vm_adminuser }}"
+        ansible_ssh_private_key_file: "keys/{{ dbserverPVT_key_file }}.pem"  #**Here we HAVE to have the .pem suffix
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o ConnectTimeout=60"
+      with_items:
+      - "{{ webservervmip }}"
+
+ #   - pause: #Work around for timing issues.
+ #       seconds: 60
+
+    #Write webserver IPs to file on dbserver C:\webs.txt - there qill only be 1 IP in this setup
+    - name: (33 of 40) Read file into a variable
+      set_fact: 
+         plantkeyps1: "{{ item }}"
+      with_file: "{{ plantkeyps1_file }}"
+
+    - name: (34 of 40) Plant key for remote access to webserver by dbserver
+      ansible.windows.win_powershell:
+        script: "{{ plantkeyps1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+    
+    #Setup tunnels from the dbserver
+    - name: (35 of 40) Write web server IPs to database server so it know where to start the ssh tunnels
+      ansible.windows.win_powershell:
+       script: |
+         Add-Content -Path {{ webserveriplist_file }} -Value "{{webservervmip}}"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - name: (36 of 40) Read file into a variable
+      set_fact: 
+         setuptunnelps1: "{{ item }}"
+      with_file: "{{ setuptunnelps1_file }}"
+
+    - name: (37 of 40) Create ssh tunnels for remote access to webservers by dbserver
+      ansible.windows.win_powershell:
+        script: "{{ setuptunnelps1 }}"
+      delegate_to: "{{ sqlservervmip }}"
+
+    - name: (38 of 40) Set Output message for completion
+      ansible.builtin.set_fact: 
+        final_msg: | 
+          {{'"'}}Webserver1 IP: {{webservervmip}} {{'"'}}
+    
+    - name: (39/40 of 40) Print out final message
+      debug:
+        msg:  "{{ final_msg }}"

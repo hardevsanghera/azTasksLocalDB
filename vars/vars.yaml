@@ -1,0 +1,31 @@
+#Edit variables (commented EDIT) to work with your local database server VM (which should be created and booted) and Azue subscription
+#I do not use ansible vault or best practices around passwords.
+#ansible vault not used to protect passwords - feel free to implement it!
+#hardev@nutanix.com Jan '25
+
+localsqlservervmip: "192.168.10.10"           #EDIT your "local" MSSQL Database Server VM
+
+vm_adminuser: "azureuser"                     #EDIT for your environment #ec2 login: the user to ssh to your ec2 instances
+mysql_password: "abcdefghij"                  #EDIT for your environment #ntnx login: password for your MySQL database, also used for the centos user
+#   
+cinit_script_path: "user_data.sh"             #az:   script used by Azure provisioning to customize target webserver VM
+win_vm_user: "Administrator"                  #ntnx: sudo enabled userid for the database server
+win_vm_pw: "abcdefghij"                       #ntnx: password for the ubuntu user on the dtabase server
+az_vmsize: "Standard_DS1_v2"                  #az:   size
+az_imgoffer: 0001-com-ubuntu-server-jammy     #az:   image
+az_imgpublisher: Canonical                    #az:   publisher
+az_imgsku: 22_04-lts                          #az    sku
+az_imgversion: latest                         #az:   version
+dbserverPVT_key_file: "dbserverkey"           #ntnx: Private key file for dbserver ssh access to webservers
+dbserverPUB_key_file: "dbserverkey.pub"       #ntnx: ssh public key for ubuntuuser access to webservers
+dbserver_ssh_key_file: "dbserverkey"          #ntnx: Private key file for dbserver ssh access
+setdiskps1_file: "sqlsvr-setupDataDisk.ps1"   #ntnx: Script to set E: as the db datatadisk
+installsqlserverps1_file: "sqlsvr-installSqlServer.ps1"  #ntnx: Script to install Microsoft SQL Server - pull in an iso form the web
+installsqlstudiops1_file: "sqlsvr-installSqlStudio.ps1" #ntnx: Script to install Microsoft SQL Studio
+mssql_user: "SA"                              #ntnx: db admin userid
+mssql_dbname: "tasks"                         #ntnx: database name for the application, this is what the database is named - edit IF you want to
+plantkeyps1_file: "sqlsvr-plantKey.ps1"       #ntnx: Copies ssh key to the db server
+webserveriplist_file: 'C:\webs.txt'           #ntnx: File used to hold the webserver public IPs
+setuptunnelps1_file: "sqlsvr-setupTunnel.ps1" #ntnx: Script to setup reverse ssh tunnels between the db server and webserver
+
+#WARNING: dbserverkey and dbserverkey.pub rsa keys will be "force" overwritten in the playbook directory

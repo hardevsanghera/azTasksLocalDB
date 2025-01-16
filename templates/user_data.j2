@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Targeted at ubuntu 24.04
+#set -x
+
+touch /tmp/IWASHERE #why not?
+
+#add user
+adduser webadmin
+
+
+
+#setup for ssh key logins - for future use - right now we use the password for webadmin
+mkdir /home/webadmin/.ssh
+touch /home/webadmin/.ssh/authorized_keys
+
+#add a password
+echo webadmin:"{{ mysql_password }}" | chpasswd
+
+#allow sudo sans password
+echo "webadmin ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/webadmin
+
+#add a key
+mykey='{{ dbserverkeypub }}'
+echo $mykey >> /home/webadmin/.ssh/authorized_keys
+
+#right modes
+chown -R webadmin:webadmin /home/webadmin/.ssh
+
+#fix ssh logins
+sed -i 's/\#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i   's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/50-cloud-init.conf
+systemctl restart sshd
+
+#Allow inward ports
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 8080/tcp
+ufw allow 8000/tcp
+ufw enable 
+
+#Install nginx
+apt update
+apt -y upgrade
+apt install -y nginx python3 python3-pip python3-dev nginx unixodbc python3-venv net-tools curl
+#add user to www-data group
+usermod -aG www-data webadmin

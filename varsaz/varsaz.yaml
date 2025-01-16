@@ -1,0 +1,14 @@
+#
+id: "NTNX_HS"
+rg_name: "rg_{{ id }}"
+az_region: "uksouth"
+vnet_name: "vnet_{{ id }}"
+vnet_prefix:  "10.0.0.0/16"
+subnet_name: "sn_{{ id }}"
+sn_prefix: "10.0.1.0/24"
+ip_name: "ip_{{ id }}"
+nic_name: "nic_{{ id }}"
+sg_name: "sg_{{ id }}"
+nwiface_name: "nwif_{{ id }}"
+webappvm_name: "webappvm1" #cannot have an "_" in the name!
+key_dir: keys
